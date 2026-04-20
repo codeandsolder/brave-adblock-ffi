@@ -1,0 +1,43 @@
+name: Sync Brave Adblock FFI
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Local Repo
+        uses: actions/checkout@v4
+
+      - name: Sparse Checkout Brave Logic
+        uses: actions/checkout@v4
+        with:
+          repository: brave/brave-core
+          path: brave-temp
+          sparse-checkout: |
+            components/brave_shields/core/common/adblock/rs/
+          sparse-checkout-cone-mode: true
+          fetch-depth: 1 
+
+      - name: Sync and Push
+        run: |
+          # Create a folder in your repo to hold the Rust code
+          mkdir -p ./adblock-rust-ffi
+          
+          # Sync only the contents of the 'rs' folder into your local directory
+          rsync -av --delete brave-temp/components/brave_shields/core/common/adblock/rs/ ./adblock-rust-ffi/
+          
+          rm -rf brave-temp
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "No changes found."
+          else
+            git commit -m "Sync: Update Brave Adblock FFI logic"
+            git push
+          fi
