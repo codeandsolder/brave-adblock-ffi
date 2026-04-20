@@ -21,15 +21,15 @@ jobs:
             --filter=blob:none \
             --no-checkout \
             https://github.com/brave/brave-core.git \
-            brave-source
-          git -C brave-source sparse-checkout set --cone \
+            "$RUNNER_TEMP/brave-source"
+          git -C "$RUNNER_TEMP/brave-source" sparse-checkout set --cone \
             components/brave_shields/core/common/adblock
 
       - name: Bootstrap History
         run: |
           TARGET_DIR="components/brave_shields/core/common/adblock"
           WORKSPACE="$GITHUB_WORKSPACE"
-          BRAVE_DIR="$WORKSPACE/brave-source"
+          BRAVE_DIR="$RUNNER_TEMP/brave-source"
 
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -81,11 +81,11 @@ jobs:
             fi
           done
 
-      - name: Sync Current Main State
+      - name: Sync Current Master State
         run: |
           TARGET_DIR="components/brave_shields/core/common/adblock"
           WORKSPACE="$GITHUB_WORKSPACE"
-          BRAVE_DIR="$WORKSPACE/brave-source"
+          BRAVE_DIR="$RUNNER_TEMP/brave-source"
 
           git -C "$BRAVE_DIR" checkout -q master
 
@@ -100,10 +100,10 @@ jobs:
           if ! git -C "$WORKSPACE" diff --quiet --staged; then
             BRAVE_VERSION=$(git -C "$BRAVE_DIR" tag --sort=-v:refname \
               | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-            git -C "$WORKSPACE" commit -m "Sync: brave-core main (post ${BRAVE_VERSION})"
-            echo "Synced main state"
+            git -C "$WORKSPACE" commit -m "Sync: brave-core master (post ${BRAVE_VERSION})"
+            echo "Synced master state"
           else
-            echo "Main state matches last tagged version, no extra commit needed."
+            echo "Master state matches last tagged version, no extra commit needed."
           fi
 
       - name: Push Everything
@@ -113,4 +113,4 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: rm -rf brave-source
+        run: rm -rf "$RUNNER_TEMP/brave-source"

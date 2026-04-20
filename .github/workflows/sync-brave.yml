@@ -20,16 +20,16 @@ jobs:
             --filter=blob:none \
             --no-checkout \
             https://github.com/brave/brave-core.git \
-            brave-source
-          git -C brave-source sparse-checkout set --cone \
+            "$RUNNER_TEMP/brave-source"
+          git -C "$RUNNER_TEMP/brave-source" sparse-checkout set --cone \
             components/brave_shields/core/common/adblock
-          git -C brave-source checkout main
+          git -C "$RUNNER_TEMP/brave-source" checkout master
 
       - name: Sync and Tag if Changed
         run: |
           TARGET_DIR="components/brave_shields/core/common/adblock"
           WORKSPACE="$GITHUB_WORKSPACE"
-          BRAVE_DIR="$WORKSPACE/brave-source"
+          BRAVE_DIR="$RUNNER_TEMP/brave-source"
 
           rsync -av --delete \
             --exclude='.git' \
@@ -63,4 +63,4 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: rm -rf brave-source
+        run: rm -rf "$RUNNER_TEMP/brave-source"
