@@ -11,49 +11,56 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Your Repo
+      - name: Checkout This Repo
         uses: actions/checkout@v4
 
-      - name: Sparse Checkout Brave
-        uses: actions/checkout@v4
-        with:
-          repository: brave/brave-core
-          path: brave-temp
-          sparse-checkout: components/brave_shields/core/common/adblock/
-          sparse-checkout-cone-mode: true
-          fetch-depth: 1 # Just the latest state
+      - name: Clone Brave Core (Blobless Sparse)
+        run: |
+          git clone \
+            --filter=blob:none \
+            --no-checkout \
+            https://github.com/brave/brave-core.git \
+            brave-source
+          git -C brave-source sparse-checkout set --cone \
+            components/brave_shields/core/common/adblock
+          git -C brave-source checkout main
 
       - name: Sync and Tag if Changed
         run: |
-          # 1. Prepare directory
-          mkdir -p ./adblock-rust-ffi
-          rsync -av --delete brave-temp/components/brave_shields/core/common/adblock/ ./adblock-rust-ffi/
-          
-          # 2. Get the current Brave version/tag name
-          # This pulls the 'latest' tag name from the Brave temp folder
-          cd brave-temp
-          BRAVE_VERSION=$(git describe --tags --abbrev=0 || echo "sync-$(date +%F)")
-          cd ..
+          TARGET_DIR="components/brave_shields/core/common/adblock"
+          WORKSPACE="$GITHUB_WORKSPACE"
+          BRAVE_DIR="$WORKSPACE/brave-source"
 
-          # 3. Git config
+          rsync -av --delete \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.gitattributes' \
+            "$BRAVE_DIR/$TARGET_DIR/" \
+            "$WORKSPACE/"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # 4. Check for changes
+
           git add .
           if git diff --quiet && git diff --staged --quiet; then
-            echo "No changes detected in adblock folder. Skipping commit and tag."
+            echo "No changes detected."
           else
-            echo "Changes detected! Tagging with Brave version: $BRAVE_VERSION"
-            
-            # Commit the changes
-            git commit -m "Sync: Updates from Brave $BRAVE_VERSION"
-            
-            # Create a tag in YOUR repo with the Brave version name
-            # We add a suffix like '-brave' to distinguish it from your own releases
-            git tag "${BRAVE_VERSION}-ffi"
-            
-            # Push commit and the specific new tag
+            BRAVE_VERSION=$(git -C "$BRAVE_DIR" tag --sort=-v:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+
+            git commit -m "Sync: Updates from Brave ${BRAVE_VERSION}"
             git push origin main
-            git push origin "${BRAVE_VERSION}-ffi"
+
+            MY_TAG="${BRAVE_VERSION}-ffi"
+            if git tag | grep -qF "$MY_TAG"; then
+              echo "Tag $MY_TAG already exists, skipping tag creation."
+            else
+              git tag "$MY_TAG"
+              git push origin "$MY_TAG"
+              echo "Created and pushed tag $MY_TAG"
+            fi
           fi
+
+      - name: Cleanup
+        if: always()
+        run: rm -rf brave-source

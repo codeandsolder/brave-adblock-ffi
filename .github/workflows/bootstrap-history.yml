@@ -1,5 +1,5 @@
 name: "1. Bootstrap: Smart History & Tags"
-on: 
+on:
   workflow_dispatch:
 
 permissions:
@@ -8,58 +8,109 @@ permissions:
 jobs:
   bootstrap:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     steps:
-      - name: Checkout Your Repo
+      - name: Checkout This Repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Clone Brave Core (Full)
+      - name: Clone Brave Core (Blobless Sparse)
         run: |
-          # We fetch the last 50 tags to scan for relevant changes
-          git clone --depth 50 --tags https://github.com/brave/brave-core.git brave-source
+          git clone \
+            --filter=blob:none \
+            --no-checkout \
+            https://github.com/brave/brave-core.git \
+            brave-source
+          git -C brave-source sparse-checkout set --cone \
+            components/brave_shields/core/common/adblock
 
-      - name: Identify Relevant Tags and Sync
-        working-directory: ./brave-source
+      - name: Bootstrap History
         run: |
           TARGET_DIR="components/brave_shields/core/common/adblock"
-          DEST_DIR="$GITHUB_WORKSPACE/adblock-rust-ffi"
-          
-          # Get list of recent tags, sorted by version
-          TAGS=$(git tag --sort=-v:refname)
-          
+          WORKSPACE="$GITHUB_WORKSPACE"
+          BRAVE_DIR="$WORKSPACE/brave-source"
+
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
+          PREV_TAG=""
+          TAGS=$(git -C "$BRAVE_DIR" tag --sort=v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$')
+
           for TAG in $TAGS; do
-            echo "Checking Brave $TAG..."
-            
-            # Check if the adblock folder changed in this version
-            # (Compares this tag to its immediate parent)
-            if git diff --quiet ${TAG}^ ${TAG} -- $TARGET_DIR; then
-              echo "No changes in $TARGET_DIR for $TAG. Skipping."
+            # Skip tags where the path doesn't exist yet (pre-move)
+            if ! git -C "$BRAVE_DIR" ls-tree "$TAG" -- "$TARGET_DIR" | grep -q .; then
+              continue
+            fi
+
+            SHOULD_SYNC=false
+            if [ -z "$PREV_TAG" ]; then
+              echo "First tag with $TARGET_DIR: $TAG"
+              SHOULD_SYNC=true
+            elif ! git -C "$BRAVE_DIR" diff --quiet "$PREV_TAG" "$TAG" -- "$TARGET_DIR"; then
+              echo "Changes detected at $TAG vs $PREV_TAG"
+              SHOULD_SYNC=true
             else
-              echo "Found changes in $TAG! Syncing..."
-              
-              # Checkout that specific version of Brave
-              git checkout -q $TAG
-              
-              # Sync files to your workspace
-              mkdir -p $DEST_DIR
-              rsync -av --delete $TARGET_DIR/ $DEST_DIR/
-              
-              # Commit and Tag in your repo
-              cd $GITHUB_WORKSPACE
-              git add .
-              if ! git diff --quiet --staged; then
-                git commit -m "Sync: Brave $TAG"
-                git tag "${TAG}-ffi" || echo "Tag ${TAG}-ffi already exists"
+              echo "No changes at $TAG, skipping."
+            fi
+
+            PREV_TAG="$TAG"
+
+            if [ "$SHOULD_SYNC" = true ]; then
+              MY_TAG="${TAG}-ffi"
+              if git -C "$WORKSPACE" tag | grep -qF "$MY_TAG"; then
+                echo "Tag $MY_TAG already exists, skipping."
+                continue
               fi
-              cd - > /dev/null
+
+              git -C "$BRAVE_DIR" checkout -q "$TAG"
+
+              rsync -av --delete \
+                --exclude='.git' \
+                --exclude='.github' \
+                --exclude='.gitattributes' \
+                "$BRAVE_DIR/$TARGET_DIR/" \
+                "$WORKSPACE/"
+
+              git -C "$WORKSPACE" add .
+              if ! git -C "$WORKSPACE" diff --quiet --staged; then
+                git -C "$WORKSPACE" commit -m "Sync: Brave $TAG"
+                git -C "$WORKSPACE" tag "$MY_TAG"
+                echo "Tagged $MY_TAG"
+              fi
             fi
           done
 
-      - name: Push to Main
+      - name: Sync Current Main State
         run: |
-          git push origin main
-          git push origin --tags
+          TARGET_DIR="components/brave_shields/core/common/adblock"
+          WORKSPACE="$GITHUB_WORKSPACE"
+          BRAVE_DIR="$WORKSPACE/brave-source"
+
+          git -C "$BRAVE_DIR" checkout -q main
+
+          rsync -av --delete \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.gitattributes' \
+            "$BRAVE_DIR/$TARGET_DIR/" \
+            "$WORKSPACE/"
+
+          git -C "$WORKSPACE" add .
+          if ! git -C "$WORKSPACE" diff --quiet --staged; then
+            BRAVE_VERSION=$(git -C "$BRAVE_DIR" tag --sort=-v:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+            git -C "$WORKSPACE" commit -m "Sync: brave-core main (post ${BRAVE_VERSION})"
+            echo "Synced main state"
+          else
+            echo "Main state matches last tagged version, no extra commit needed."
+          fi
+
+      - name: Push Everything
+        run: |
+          git -C "$GITHUB_WORKSPACE" push origin main
+          git -C "$GITHUB_WORKSPACE" push origin --tags
+
+      - name: Cleanup
+        if: always()
+        run: rm -rf brave-source
