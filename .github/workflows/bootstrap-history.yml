@@ -87,7 +87,7 @@ jobs:
           WORKSPACE="$GITHUB_WORKSPACE"
           BRAVE_DIR="$WORKSPACE/brave-source"
 
-          git -C "$BRAVE_DIR" checkout -q main
+          git -C "$BRAVE_DIR" checkout -q master
 
           rsync -av --delete \
             --exclude='.git' \
