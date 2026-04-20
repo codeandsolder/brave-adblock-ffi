@@ -1,0 +1,66 @@
+name: "2. Maintenance: Sync + Smart Tagging"
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout This Repo
+        uses: actions/checkout@v4
+
+      - name: Clone Brave Core (Blobless Sparse)
+        run: |
+          git clone \
+            --filter=blob:none \
+            --no-checkout \
+            https://github.com/brave/brave-core.git \
+            "$RUNNER_TEMP/brave-source"
+          git -C "$RUNNER_TEMP/brave-source" sparse-checkout set --cone \
+            components/brave_shields/core/common/adblock
+          git -C "$RUNNER_TEMP/brave-source" checkout master
+
+      - name: Sync and Tag if Changed
+        run: |
+          TARGET_DIR="components/brave_shields/core/common/adblock"
+          WORKSPACE="$GITHUB_WORKSPACE"
+          BRAVE_DIR="$RUNNER_TEMP/brave-source"
+
+          rsync -av --delete \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.gitattributes' \
+            "$BRAVE_DIR/$TARGET_DIR/" \
+            "$WORKSPACE/" || [ $? -eq 24 ]
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add .
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "No changes detected."
+          else
+            BRAVE_VERSION=$(git -C "$BRAVE_DIR" tag --sort=-v:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+
+            git commit -m "Sync: Updates from Brave ${BRAVE_VERSION}"
+            git push origin main
+
+            MY_TAG="${BRAVE_VERSION}-ffi"
+            if git tag | grep -qF "$MY_TAG"; then
+              echo "Tag $MY_TAG already exists, skipping tag creation."
+            else
+              git tag "$MY_TAG"
+              git push origin "$MY_TAG"
+              echo "Created and pushed tag $MY_TAG"
+            fi
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/brave-source"
