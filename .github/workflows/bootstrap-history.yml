@@ -70,7 +70,7 @@ jobs:
                 --exclude='.github' \
                 --exclude='.gitattributes' \
                 "$BRAVE_DIR/$TARGET_DIR/" \
-                "$WORKSPACE/"
+                "$WORKSPACE/" || [ $? -eq 24 ]
 
               git -C "$WORKSPACE" add .
               if ! git -C "$WORKSPACE" diff --quiet --staged; then
@@ -94,7 +94,7 @@ jobs:
             --exclude='.github' \
             --exclude='.gitattributes' \
             "$BRAVE_DIR/$TARGET_DIR/" \
-            "$WORKSPACE/"
+            "$WORKSPACE/" || [ $? -eq 24 ]
 
           git -C "$WORKSPACE" add .
           if ! git -C "$WORKSPACE" diff --quiet --staged; then
