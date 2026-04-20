@@ -1,0 +1,65 @@
+name: "1. Bootstrap: Smart History & Tags"
+on: 
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Your Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone Brave Core (Full)
+        run: |
+          # We fetch the last 50 tags to scan for relevant changes
+          git clone --depth 50 --tags https://github.com/brave/brave-core.git brave-source
+
+      - name: Identify Relevant Tags and Sync
+        working-directory: ./brave-source
+        run: |
+          TARGET_DIR="components/brave_shields/core/common/adblock"
+          DEST_DIR="$GITHUB_WORKSPACE/adblock-rust-ffi"
+          
+          # Get list of recent tags, sorted by version
+          TAGS=$(git tag --sort=-v:refname)
+          
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          for TAG in $TAGS; do
+            echo "Checking Brave $TAG..."
+            
+            # Check if the adblock folder changed in this version
+            # (Compares this tag to its immediate parent)
+            if git diff --quiet ${TAG}^ ${TAG} -- $TARGET_DIR; then
+              echo "No changes in $TARGET_DIR for $TAG. Skipping."
+            else
+              echo "Found changes in $TAG! Syncing..."
+              
+              # Checkout that specific version of Brave
+              git checkout -q $TAG
+              
+              # Sync files to your workspace
+              mkdir -p $DEST_DIR
+              rsync -av --delete $TARGET_DIR/ $DEST_DIR/
+              
+              # Commit and Tag in your repo
+              cd $GITHUB_WORKSPACE
+              git add .
+              if ! git diff --quiet --staged; then
+                git commit -m "Sync: Brave $TAG"
+                git tag "${TAG}-ffi" || echo "Tag ${TAG}-ffi already exists"
+              fi
+              cd - > /dev/null
+            fi
+          done
+
+      - name: Push to Main
+        run: |
+          git push origin main
+          git push origin --tags
