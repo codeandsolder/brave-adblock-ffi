@@ -1,19 +1,15 @@
+# Separate C FFI crate that reuses the same source but compiles to pure C staticlib
+
 [package]
-name = "adblock-cxx"
+name = "adblock-c-ffi"
 version = "1.0.0"
 edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
 adblock = { version = "0.12.0", default-features = false, features = ["full-regex-handling", "debug-info", "css-validation"] }
-cxx = "1.0"
 serde_json = "1.0"
-thiserror = "1.0"
-
-[features]
-ios = ["adblock/content-blocking"]
-single_thread_optimizations = ["adblock/single-thread"]
 
 [lib]
-name = "adblock_cxx"
-crate-type = ["rlib", "staticlib"]
+name = "adblock_c_ffi"
+crate-type = ["staticlib"]
