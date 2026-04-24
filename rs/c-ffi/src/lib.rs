@@ -314,8 +314,7 @@ pub extern "C" fn c_adblock_free_string(s: *mut c_char) {
     if !s.is_null() {
         unsafe {
             let len = cstring_len(s);
-            let slice = std::slice::from_raw_parts_mut(s as *mut u8, len + 1);
-            let _ = Vec::from_raw_parts(slice.as_mut_ptr(), len, len + 1);
+            let _ = Vec::from_raw_parts(s as *mut u8, len + 1, len + 1);
         }
     }
 }
