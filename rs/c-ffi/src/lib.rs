@@ -14,19 +14,13 @@
 use adblock::lists::FilterSet as InnerFilterSet;
 use adblock::url_parser::ResolvesDomain;
 use adblock::Engine as InnerEngine;
-use std::ffi::{c_char, c_void};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::ptr;
 use std::sync::OnceLock;
 
 mod c_convert;
-
 pub use c_convert::*;
 
-// ============================================================================
-// Types
-// ============================================================================
-
-/// Result of a blocking operation - C compatible layout
 #[repr(C)]
 pub struct CBlockerResult {
     pub matched: bool,
@@ -48,11 +42,16 @@ impl Default for CBlockerResult {
     }
 }
 
+#[repr(C)]
+pub struct CFilterList {
+    pub data: *const u8,
+    pub len: usize,
+}
+
 /// Callback type for domain resolution.
 /// Takes a hostname and returns (start, end) indices of the domain part.
 /// If the callback returns (0, 0), the domain is the entire hostname.
-type DomainResolverCallback =
-    extern "C" fn(host: *const c_char, start: *mut u32, end: *mut u32);
+type DomainResolverCallback = extern "C" fn(host: *const c_char, start: *mut u32, end: *mut u32);
 
 static DOMAIN_RESOLVER: OnceLock<DomainResolverCallback> = OnceLock::new();
 static DOMAIN_RESOLVER_SET: OnceLock<bool> = OnceLock::new();
@@ -104,14 +103,14 @@ struct CallbackDomainResolver;
 
 impl ResolvesDomain for CallbackDomainResolver {
     fn get_host_domain(&self, host: &str) -> (usize, usize) {
-        let resolver = DOMAIN_RESOLVER.get().copied().unwrap_or(default_domain_resolver);
-
+        let resolver = DOMAIN_RESOLVER
+            .get()
+            .copied()
+            .unwrap_or(default_domain_resolver);
         let mut start: u32 = 0;
         let mut end: u32 = 0;
-
-        let c_host = std::ffi::CString::new(host).unwrap_or_default();
+        let c_host = CString::new(host).unwrap_or_default();
         resolver(c_host.as_ptr(), &mut start, &mut end);
-
         (start as usize, end as usize)
     }
 }
@@ -141,7 +140,6 @@ pub extern "C" fn c_adblock_set_domain_resolver(resolver: DomainResolverCallback
     adblock::url_parser::set_domain_resolver(Box::new(CallbackDomainResolver)).is_ok()
 }
 
-/// Checks if a domain resolver has been set.
 #[no_mangle]
 pub extern "C" fn c_adblock_has_domain_resolver() -> bool {
     DOMAIN_RESOLVER_SET.get() == Some(&true)
@@ -152,114 +150,112 @@ pub extern "C" fn c_adblock_has_domain_resolver() -> bool {
 // ============================================================================
 
 /// Opaque engine handle
-pub type CEngine = InnerEngine;
+pub struct CEngine {
+    engine: InnerEngine,
+    lists: Vec<String>,
+}
+
+fn engine_from_lists(lists: &[String]) -> InnerEngine {
+    let mut filter_set = InnerFilterSet::new(false);
+    for filter_list in lists {
+        let _ = filter_set.add_filter_list(filter_list, Default::default());
+    }
+    InnerEngine::from_filter_set(filter_set, true)
+}
+
+fn lists_from_parts(rules_array: *const CFilterList, rules_count: usize) -> Option<Vec<String>> {
+    let mut lists = Vec::with_capacity(rules_count);
+    if rules_array.is_null() || rules_count == 0 {
+        return Some(lists);
+    }
+
+    let slice = unsafe { std::slice::from_raw_parts(rules_array, rules_count) };
+    for rules in slice {
+        if rules.data.is_null() || rules.len == 0 {
+            continue;
+        }
+
+        let bytes = unsafe { std::slice::from_raw_parts(rules.data, rules.len) };
+        let Ok(filter_list) = std::str::from_utf8(bytes) else {
+            return None;
+        };
+        lists.push(filter_list.to_owned());
+    }
+
+    Some(lists)
+}
 
 /// Creates a new engine with no rules.
 #[no_mangle]
 pub extern "C" fn c_adblock_create_engine() -> *mut c_void {
     init_domain_resolver();
-    let engine = InnerEngine::default();
-    Box::into_raw(Box::new(engine)) as *mut c_void
+    let handle = CEngine {
+        engine: InnerEngine::default(),
+        lists: Vec::new(),
+    };
+    Box::into_raw(Box::new(handle)) as *mut c_void
 }
 
-/// Creates a new engine with rules from a filter list.
-/// Returns null on error.
+/// Creates a new engine from an array of filter-list byte slices.
 #[no_mangle]
-pub extern "C" fn c_adblock_create_engine_with_rules(
-    rules: *const c_char,
-    rules_len: usize,
+pub extern "C" fn c_adblock_create_engine_from_lists(
+    rules_array: *const CFilterList,
+    rules_count: usize,
 ) -> *mut c_void {
-    if rules.is_null() || rules_len == 0 {
+    init_domain_resolver();
+    let Some(lists) = lists_from_parts(rules_array, rules_count) else {
         return ptr::null_mut();
-    }
-
-    let rules_slice = unsafe { std::slice::from_raw_parts(rules as *const u8, rules_len) };
-    let rules_str = match std::str::from_utf8(rules_slice) {
-        Ok(s) => s,
-        Err(_) => return ptr::null_mut(),
     };
 
-    init_domain_resolver();
-
-    let mut filter_set = InnerFilterSet::new(false);
-    let _ = filter_set.add_filter_list(rules_str, Default::default());
-    let engine = InnerEngine::from_filter_set(filter_set, true);
-    Box::into_raw(Box::new(engine)) as *mut c_void
+    let handle = CEngine {
+        engine: engine_from_lists(&lists),
+        lists,
+    };
+    Box::into_raw(Box::new(handle)) as *mut c_void
 }
 
-/// Adds a filter list to an existing engine.
-/// The engine is rebuilt with the new filter list.
 #[no_mangle]
-pub extern "C" fn c_adblock_add_filter_list(
+pub extern "C" fn c_adblock_replace_filter_lists(
     engine: *mut c_void,
-    rules: *const c_char,
-    rules_len: usize,
+    rules_array: *const CFilterList,
+    rules_count: usize,
 ) -> bool {
-    if engine.is_null() || rules.is_null() || rules_len == 0 {
+    if engine.is_null() {
         return false;
     }
 
-    init_domain_resolver();
-
-    let rules_slice = unsafe { std::slice::from_raw_parts(rules as *const u8, rules_len) };
-    let rules_str = match std::str::from_utf8(rules_slice) {
-        Ok(s) => s,
-        Err(_) => return false,
+    let Some(lists) = lists_from_parts(rules_array, rules_count) else {
+        return false;
     };
-
-    let old_engine = unsafe { &mut *(engine as *mut InnerEngine) };
-
-    let mut filter_set = InnerFilterSet::new(false);
-    let _ = filter_set.add_filter_list(rules_str, Default::default());
-
-    let new_engine = InnerEngine::from_filter_set(filter_set, true);
-    *old_engine = new_engine;
+    let next_engine = engine_from_lists(&lists);
+    let handle = unsafe { &mut *(engine as *mut CEngine) };
+    handle.engine = next_engine;
+    handle.lists = lists;
     true
 }
 
-/// Checks if a request should be blocked.
 #[no_mangle]
 pub extern "C" fn c_adblock_matches(
     engine: *const c_void,
     url: *const c_char,
-    hostname: *const c_char,
-    source_hostname: *const c_char,
     request_type: *const c_char,
-    third_party: bool,
+    source_url: *const c_char,
 ) -> CBlockerResult {
-    if engine.is_null() || url.is_null() || hostname.is_null() || request_type.is_null() {
+    if engine.is_null() || url.is_null() || request_type.is_null() {
         return CBlockerResult::default();
     }
 
-    let url_str = match ptr_to_string(url) {
-        Some(s) => s,
-        None => return CBlockerResult::default(),
-    };
-    let hostname_str = match ptr_to_string(hostname) {
-        Some(s) => s,
-        None => return CBlockerResult::default(),
-    };
-    let source_hostname_str = if source_hostname.is_null() {
-        String::new()
-    } else {
-        ptr_to_string(source_hostname).unwrap_or_default()
-    };
-    let request_type_str = match ptr_to_string(request_type) {
-        Some(s) => s,
-        None => return CBlockerResult::default(),
+    let url_str = unsafe { ptr_to_str(url) };
+    let request_type_str = unsafe { ptr_to_str(request_type) };
+    let source_url_str = unsafe { ptr_to_str(source_url) };
+
+    let handle = unsafe { &*(engine as *const CEngine) };
+    let Ok(request) = adblock::request::Request::new(url_str, source_url_str, request_type_str)
+    else {
+        return CBlockerResult::default();
     };
 
-    let engine_ref = unsafe { &*(engine as *const InnerEngine) };
-
-    let request = adblock::request::Request::preparsed(
-        &url_str,
-        &hostname_str,
-        &source_hostname_str,
-        &request_type_str,
-        third_party,
-    );
-
-    let result = engine_ref.check_network_request_subset(&request, false, false);
+    let result = handle.engine.check_network_request(&request);
 
     let mut blocker_result = CBlockerResult::default();
     blocker_result.matched = result.matched;
@@ -276,7 +272,6 @@ pub extern "C" fn c_adblock_matches(
     blocker_result
 }
 
-/// Returns JSON-serialized cosmetic filter resources for a URL.
 #[no_mangle]
 pub extern "C" fn c_adblock_get_cosmetic_filters(
     engine: *const c_void,
@@ -286,35 +281,29 @@ pub extern "C" fn c_adblock_get_cosmetic_filters(
         return ptr::null_mut();
     }
 
-    let url_str = match ptr_to_string(url) {
-        Some(s) => s,
-        None => return ptr::null_mut(),
-    };
-
-    let engine_ref = unsafe { &*(engine as *const InnerEngine) };
-    let cosmetic_resources = engine_ref.url_cosmetic_resources(&url_str);
+    let url_str = unsafe { ptr_to_str(url) };
+    let handle = unsafe { &*(engine as *const CEngine) };
+    let cosmetic_resources = handle.engine.url_cosmetic_resources(url_str);
     let cosmetic_json = serde_json::to_string(&cosmetic_resources).unwrap_or_default();
 
     alloc_c_string(&cosmetic_json)
 }
 
-/// Destroys an engine and frees memory.
 #[no_mangle]
 pub extern "C" fn c_adblock_destroy_engine(engine: *mut c_void) {
     if !engine.is_null() {
         unsafe {
-            drop(Box::from_raw(engine as *mut InnerEngine));
+            drop(Box::from_raw(engine as *mut CEngine));
         }
     }
 }
 
-/// Frees a string allocated by the library.
+/// Safely frees a string using standard CString semantics.
 #[no_mangle]
 pub extern "C" fn c_adblock_free_string(s: *mut c_char) {
     if !s.is_null() {
         unsafe {
-            let len = cstring_len(s);
-            let _ = Vec::from_raw_parts(s as *mut u8, len + 1, len + 1);
+            let _ = CString::from_raw(s);
         }
     }
 }
@@ -323,21 +312,18 @@ pub extern "C" fn c_adblock_free_string(s: *mut c_char) {
 // Helper Functions
 // ============================================================================
 
-fn ptr_to_string(ptr: *const c_char) -> Option<String> {
-    let len = cstring_len(ptr);
-    if len == 0 {
-        return Some(String::new());
+/// Returns a zero-copy string slice bound to the lifetime of the pointer.
+unsafe fn ptr_to_str<'a>(ptr: *const c_char) -> &'a str {
+    if ptr.is_null() {
+        return "";
     }
-    unsafe {
-        let slice = std::slice::from_raw_parts(ptr as *const u8, len);
-        std::str::from_utf8(slice).ok().map(|s| s.to_string())
-    }
+    CStr::from_ptr(ptr).to_str().unwrap_or("")
 }
 
+/// Safely allocates an owned C string for the FFI boundary.
 fn alloc_c_string(s: &str) -> *mut c_char {
-    let mut vec = s.as_bytes().to_vec();
-    vec.push(0);
-    let ptr = vec.as_mut_ptr();
-    std::mem::forget(vec);
-    ptr as *mut c_char
+    match CString::new(s) {
+        Ok(cstr) => cstr.into_raw(),
+        Err(_) => ptr::null_mut(),
+    }
 }
