@@ -9,7 +9,7 @@
 //! any language that supports C FFI (Zig, Python via ctypes, Rust, etc.).
 //!
 //! Unlike the C++ FFI (lib.rs), this does not require cxx or Chromium's
-//! domain resolver. A domain resolver can be set via `adblock_c_set_domain_resolver`.
+//! domain resolver. A domain resolver can be set via `c_adblock_set_domain_resolver`.
 
 use adblock::lists::FilterSet as InnerFilterSet;
 use adblock::url_parser::ResolvesDomain;
@@ -135,7 +135,7 @@ fn init_domain_resolver() {
 /// This must be called before any engine operations.
 /// Returns true if the resolver was set successfully.
 #[no_mangle]
-pub extern "C" fn adblock_c_set_domain_resolver(resolver: DomainResolverCallback) -> bool {
+pub extern "C" fn c_adblock_set_domain_resolver(resolver: DomainResolverCallback) -> bool {
     let _ = DOMAIN_RESOLVER.set(resolver);
     let _ = DOMAIN_RESOLVER_SET.set(true);
     adblock::url_parser::set_domain_resolver(Box::new(CallbackDomainResolver)).is_ok()
@@ -143,7 +143,7 @@ pub extern "C" fn adblock_c_set_domain_resolver(resolver: DomainResolverCallback
 
 /// Checks if a domain resolver has been set.
 #[no_mangle]
-pub extern "C" fn adblock_c_has_domain_resolver() -> bool {
+pub extern "C" fn c_adblock_has_domain_resolver() -> bool {
     DOMAIN_RESOLVER_SET.get() == Some(&true)
 }
 
@@ -156,7 +156,7 @@ pub type CEngine = InnerEngine;
 
 /// Creates a new engine with no rules.
 #[no_mangle]
-pub extern "C" fn adblock_c_create_engine() -> *mut c_void {
+pub extern "C" fn c_adblock_create_engine() -> *mut c_void {
     init_domain_resolver();
     let engine = InnerEngine::default();
     Box::into_raw(Box::new(engine)) as *mut c_void
@@ -165,7 +165,7 @@ pub extern "C" fn adblock_c_create_engine() -> *mut c_void {
 /// Creates a new engine with rules from a filter list.
 /// Returns null on error.
 #[no_mangle]
-pub extern "C" fn adblock_c_create_engine_with_rules(
+pub extern "C" fn c_adblock_create_engine_with_rules(
     rules: *const c_char,
     rules_len: usize,
 ) -> *mut c_void {
@@ -190,7 +190,7 @@ pub extern "C" fn adblock_c_create_engine_with_rules(
 /// Adds a filter list to an existing engine.
 /// The engine is rebuilt with the new filter list.
 #[no_mangle]
-pub extern "C" fn adblock_c_add_filter_list(
+pub extern "C" fn c_adblock_add_filter_list(
     engine: *mut c_void,
     rules: *const c_char,
     rules_len: usize,
@@ -219,7 +219,7 @@ pub extern "C" fn adblock_c_add_filter_list(
 
 /// Checks if a request should be blocked.
 #[no_mangle]
-pub extern "C" fn adblock_c_matches(
+pub extern "C" fn c_adblock_matches(
     engine: *const c_void,
     url: *const c_char,
     hostname: *const c_char,
@@ -278,7 +278,7 @@ pub extern "C" fn adblock_c_matches(
 
 /// Returns JSON-serialized cosmetic filter resources for a URL.
 #[no_mangle]
-pub extern "C" fn adblock_c_get_cosmetic_filters(
+pub extern "C" fn c_adblock_get_cosmetic_filters(
     engine: *const c_void,
     url: *const c_char,
 ) -> *mut c_char {
@@ -300,7 +300,7 @@ pub extern "C" fn adblock_c_get_cosmetic_filters(
 
 /// Destroys an engine and frees memory.
 #[no_mangle]
-pub extern "C" fn adblock_c_destroy_engine(engine: *mut c_void) {
+pub extern "C" fn c_adblock_destroy_engine(engine: *mut c_void) {
     if !engine.is_null() {
         unsafe {
             drop(Box::from_raw(engine as *mut InnerEngine));
@@ -310,7 +310,7 @@ pub extern "C" fn adblock_c_destroy_engine(engine: *mut c_void) {
 
 /// Frees a string allocated by the library.
 #[no_mangle]
-pub extern "C" fn adblock_c_free_string(s: *mut c_char) {
+pub extern "C" fn c_adblock_free_string(s: *mut c_char) {
     if !s.is_null() {
         unsafe {
             let len = cstring_len(s);
