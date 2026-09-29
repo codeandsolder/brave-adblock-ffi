@@ -26,8 +26,14 @@ use cxx::UniquePtr;
 impl From<Option<String>> for OptionalString {
     fn from(value: Option<String>) -> Self {
         match value {
-            None => Self { has_value: false, value: String::new() },
-            Some(value) => Self { has_value: true, value },
+            None => Self {
+                has_value: false,
+                value: String::new(),
+            },
+            Some(value) => Self {
+                has_value: true,
+                value,
+            },
         }
     }
 }
@@ -35,8 +41,14 @@ impl From<Option<String>> for OptionalString {
 impl From<Option<u16>> for OptionalU16 {
     fn from(value: Option<u16>) -> Self {
         match value {
-            None => Self { has_value: false, value: 0 },
-            Some(value) => Self { has_value: true, value },
+            None => Self {
+                has_value: false,
+                value: 0,
+            },
+            Some(value) => Self {
+                has_value: true,
+                value,
+            },
         }
     }
 }
@@ -68,7 +80,12 @@ impl From<InnerSourceInfo> for SourceInfo {
 impl From<InnerEngineDebugInfo> for DebugInfo {
     fn from(info: InnerEngineDebugInfo) -> Self {
         Self {
-            regex_data: info.regex_debug_info.regex_data.into_iter().map(|e| e.into()).collect(),
+            regex_data: info
+                .regex_debug_info
+                .regex_data
+                .into_iter()
+                .map(|e| e.into())
+                .collect(),
             compiled_regex_count: info.regex_debug_info.compiled_regex_count,
             flatbuffer_size: info.flatbuffer_size,
             source_info: info.source_info.into_iter().map(|e| e.into()).collect(),
@@ -85,7 +102,11 @@ fn to_filter_rule_info(info: Option<InnerFilterRuleDebugInfo>) -> UniquePtr<Filt
         return UniquePtr::null();
     };
 
-    let mut filter_rule_info = FilterRuleInfo { raw_line, source_index: -1, line_number: -1 };
+    let mut filter_rule_info = FilterRuleInfo {
+        raw_line,
+        source_index: -1,
+        line_number: -1,
+    };
     if let Some(source_location) = info.source_location {
         filter_rule_info.source_index = i32::try_from(source_location.source_index).unwrap_or(-1);
         filter_rule_info.line_number = i32::try_from(source_location.line_number).unwrap_or(-1);
@@ -122,12 +143,19 @@ impl From<InnerFilterListMetadata> for FilterListMetadata {
             ExpiresInterval::Hours(hours) => hours,
             ExpiresInterval::Days(days) => days as u16 * 24,
         }));
-        Self { homepage: metadata.homepage.into(), title: metadata.title.into(), expires_hours }
+        Self {
+            homepage: metadata.homepage.into(),
+            title: metadata.title.into(),
+            expires_hours,
+        }
     }
 }
 
 impl From<InnerAddedFiltersRecord> for AddedFiltersRecord {
     fn from(record: InnerAddedFiltersRecord) -> Self {
-        Self { source_index: record.source_index, metadata: record.metadata.into() }
+        Self {
+            source_index: record.source_index,
+            metadata: record.metadata.into(),
+        }
     }
 }

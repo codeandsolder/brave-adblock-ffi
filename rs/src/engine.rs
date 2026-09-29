@@ -33,7 +33,9 @@ impl Default for Box<Engine> {
 }
 
 pub fn new_engine() -> Box<Engine> {
-    Box::new(Engine { engine: InnerEngine::default() })
+    Box::new(Engine {
+        engine: InnerEngine::default(),
+    })
 }
 
 pub fn engine_with_rules(rules: &CxxVector<u8>) -> BoxEngineResult {
@@ -90,7 +92,10 @@ pub fn convert_rules_to_content_blocking(rules: &CxxString) -> ContentBlockingRu
         let mut filter_set = InnerFilterSet::new(true);
         filter_set.add_filter_list(
             rules.to_str()?.to_string(),
-            ParseOptions { rule_types: RuleTypes::NetworkOnly, ..Default::default() },
+            ParseOptions {
+                rule_types: RuleTypes::NetworkOnly,
+                ..Default::default()
+            },
         );
 
         // `unwrap` is safe here because `into_content_blocking` only panics if the
@@ -107,7 +112,10 @@ pub fn convert_rules_to_content_blocking(rules: &CxxString) -> ContentBlockingRu
         } else {
             false
         };
-        Ok(ContentBlockingRules { rules_json: serde_json::to_string(&cb_rules)?, truncated })
+        Ok(ContentBlockingRules {
+            rules_json: serde_json::to_string(&cb_rules)?,
+            truncated,
+        })
     }()
     .into()
 }
@@ -123,7 +131,10 @@ fn convert_cxx_string_vector_to_string_collection<C>(
 where
     C: FromIterator<String>,
 {
-    value.iter().map(|s| s.to_str().map(|t| t.to_string())).collect()
+    value
+        .iter()
+        .map(|s| s.to_str().map(|t| t.to_string()))
+        .collect()
 }
 
 impl Engine {
@@ -208,7 +219,9 @@ impl Engine {
             let ids: Vec<String> = convert_cxx_string_vector_to_string_collection(ids)?;
             let exceptions: HashSet<String> =
                 convert_cxx_string_vector_to_string_collection(exceptions)?;
-            Ok(self.engine.hidden_class_id_selectors(&classes, &ids, &exceptions))
+            Ok(self
+                .engine
+                .hidden_class_id_selectors(&classes, &ids, &exceptions))
         }()
         .into()
     }
@@ -222,6 +235,7 @@ impl Engine {
     }
 
     pub fn set_regex_discard_policy(&mut self, new_discard_policy: &RegexManagerDiscardPolicy) {
-        self.engine.set_regex_discard_policy(new_discard_policy.into())
+        self.engine
+            .set_regex_discard_policy(new_discard_policy.into())
     }
 }

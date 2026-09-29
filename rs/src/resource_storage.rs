@@ -55,7 +55,9 @@ pub fn extend_resource_storage(
             for resource in additional_resources {
                 let _ = inner_storage.add_resource(resource);
             }
-            return Box::new(BraveCoreResourceStorage { shared_storage: Arc::new(inner_storage) });
+            return Box::new(BraveCoreResourceStorage {
+                shared_storage: Arc::new(inner_storage),
+            });
         }
     }
     clone_resource_storage(storage)

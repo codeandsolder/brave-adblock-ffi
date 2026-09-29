@@ -54,8 +54,16 @@ macro_rules! impl_result_from_trait {
     ($result_type:ty, $value_type:ty) => {
         impl From<Result<$value_type, InternalError>> for $result_type {
             fn from(result: Result<$value_type, InternalError>) -> Self {
-                let PreResult { value, result_kind, error_message } = PreResult::from(result);
-                Self { value, result_kind, error_message }
+                let PreResult {
+                    value,
+                    result_kind,
+                    error_message,
+                } = PreResult::from(result);
+                Self {
+                    value,
+                    result_kind,
+                    error_message,
+                }
             }
         }
     };
@@ -67,9 +75,11 @@ where
 {
     fn from(result: Result<T, InternalError>) -> Self {
         match result {
-            Ok(value) => {
-                Self { value, result_kind: ResultKind::Success, error_message: String::new() }
-            }
+            Ok(value) => Self {
+                value,
+                result_kind: ResultKind::Success,
+                error_message: String::new(),
+            },
             Err(e) => Self {
                 value: Default::default(),
                 result_kind: (&e).into(),
